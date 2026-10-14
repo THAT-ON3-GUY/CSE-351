@@ -15,6 +15,8 @@ where:
 name: name of the city
 recno: record number starting from 0
 
+My assignment is a 4 because not only do I complete processing well under the required 60 seconds but I've made sure to make it efficent as possible with a correctly placed lock and maximizing throughput with threads despite the queue limitations.
+
 """
 
 import time
