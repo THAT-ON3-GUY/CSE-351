@@ -8,7 +8,7 @@ Instructions:
 
 In order to retrieve a weather record from the server, Use the URL:
 
-f'{TOP_API_URL}/record/{name}/{recno}
+f'{TOP_API_URL}/record/{name}/{recno}'
 
 where:
 
@@ -22,30 +22,79 @@ from common import *
 
 from cse351 import *
 
-THREADS = 0                 # TODO - set for your program
-WORKERS = 0                 # TODO - set for your program
+THREADS = 200                 # TODO - set for your program
+WORKERS = 100                 # TODO - set for your program
 RECORDS_TO_RETRIEVE = 5000  # Don't change
 
 
 # ---------------------------------------------------------------------------
-def retrieve_weather_data():
+def retrieve_weather_data(input_queue, filled_input_slots, empty_input_slots, output_queue, filled_output_slots, empty_output_slots, bar):
     # TODO - fill out this thread function (and arguments)
-    ...
+    while True:
+        filled_input_slots.acquire()
+        command = input_queue.get()
+        empty_input_slots.release()
+
+        if command is None:
+            break
+
+        data = get_data_from_server(f'{TOP_API_URL}/record/{command[0]}/{command[1]}')
+        empty_output_slots.acquire()
+        output_queue.put((data['city'], data['date'], data['temp']))
+        filled_output_slots.release()
+
+    id = bar.wait()
+    if id == 0:
+        for _ in range(WORKERS):
+            empty_output_slots.acquire()
+            output_queue.put(None)
+            filled_output_slots.release()
 
 
 # ---------------------------------------------------------------------------
 # TODO - Create Worker threaded class
+class Worker(threading.Thread):
 
+    def __init__(self, queue, filled_slots, empty_slots, noaa):
+        threading.Thread.__init__(self)
+        self.queue = queue
+        self.filled_slots = filled_slots
+        self.empty_slots = empty_slots
+        self.noaa = noaa
+
+    def run(self):
+        while True:
+            self.filled_slots.acquire()
+            data = self.queue.get()
+            self.empty_slots.release()
+
+            if data is None:
+                break
+            self.noaa.store_data(data[0], data[1], data[2])
+                
 
 # ---------------------------------------------------------------------------
 # TODO - Complete this class
 class NOAA:
 
     def __init__(self):
-        ...
+        self.noaa_lock = threading.Lock()
+        self.city_dict = {}
+        for city in CITIES:
+            self.city_dict[city] = []
+
+    def store_data(self, city, date, temp):
+        with self.noaa_lock:
+            self.city_dict[city].append((date, temp))
 
     def get_temp_details(self, city):
-        return 0.0
+
+        avg_temp = 0.0
+
+        data = self.city_dict[city]
+        for instance in data:
+            avg_temp += instance[1]
+        return avg_temp / len(data)
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +176,39 @@ def main():
 
     # TODO - Create any queues, semaphores, locks or barriers you need
 
+    retrieve_queue = Queue351()
+    worker_queue = Queue351()
 
+    retrieve_slots_filled = threading.Semaphore(0)
+    retrieve_slots_empty = threading.Semaphore(10)
+
+    worker_slots_filled = threading.Semaphore(0)
+    worker_slots_empty = threading.Semaphore(10)
+
+    retrieve_barrier = threading.Barrier(THREADS)
+
+    retrievers = [threading.Thread(target=retrieve_weather_data, args=(retrieve_queue, retrieve_slots_filled, retrieve_slots_empty, worker_queue, worker_slots_filled, worker_slots_empty, retrieve_barrier)) for _ in range(THREADS)]
+
+    workers = [Worker(worker_queue, worker_slots_filled, worker_slots_empty, noaa) for _ in range(WORKERS)]
+
+    [t.start() for t in retrievers + workers]
+
+
+    for name in CITIES:
+        record = 0
+        while record < records:
+            retrieve_slots_empty.acquire()
+            retrieve_queue.put((name, record))
+            retrieve_slots_filled.release()
+            record += 1
+    for _ in range(THREADS):
+        retrieve_slots_empty.acquire()
+        retrieve_queue.put(None)
+        retrieve_slots_filled.release()
+    print("Done adding commands to queue.")
+    
+
+    [t.join() for t in retrievers + workers]
 
 
     # End server - don't change below
