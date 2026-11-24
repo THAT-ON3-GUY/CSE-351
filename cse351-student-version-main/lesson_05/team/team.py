@@ -20,6 +20,8 @@ from matplotlib.pylab import plt  # load plot library
 # Include cse 351 common Python files
 from cse351 import *
 
+
+
 def is_prime(n):
     if n <= 3:
         return n > 1
@@ -32,6 +34,12 @@ def is_prime(n):
         i += 6
     return True
 
+def worker(n):
+    if is_prime(n):
+        return True
+    else:
+        return -1
+
 def main():
     log = Log(show_terminal=True)
     log.start_timer()
@@ -43,17 +51,30 @@ def main():
 
     start = 10000000000
     range_count = 100000
-    numbers_processed = 0
-    prime_count = 0
-    for i in range(start, start + range_count):
-        numbers_processed += 1
-        if is_prime(i):
-            prime_count += 1
-            print(i, end=', ', flush=True)
-    print(flush=True)
 
-    end_time = time.time()
-    elapsed_time = end_time - start_time
+
+    for i in range(1, mp.cpu_count() + 1):
+
+        print(f'cpu = {i}', flush=True)
+
+        start_time = time.time()
+
+        numbers = list(range(start, start + range_count))
+
+        with mp.Pool(i) as p:
+            results = p.map(worker, numbers)
+
+        print(len(results))
+
+        primes = list(filter(lambda x: x > 0, results))
+        print(len(primes))
+
+
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+
+        xaxis_cpus.append(i)
+        yaxis_times.append(elapsed_time)
 
     # create plot of results and also save it to a PNG file
     plt.plot(xaxis_cpus, yaxis_times)

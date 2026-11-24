@@ -68,6 +68,9 @@ MAX_MEALS_EATEN = PHILOSOPHERS * 5 # NOTE: Total meals to be eaten, not per phil
 
 def main():
     # TODO - Create the forks.
+    forks = [threading.Lock() for _ in range(PHILOSOPHERS)]
+
+    
     # TODO - Create PHILOSOPHERS philosophers.
     # TODO - Start them eating and thinking.
     # TODO - Display how many times each philosopher ate.

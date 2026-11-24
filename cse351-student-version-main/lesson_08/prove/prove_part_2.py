@@ -2,7 +2,7 @@
 Course: CSE 351 
 Assignment: 08 Prove Part 2
 File:   prove_part_2.py
-Author: <Add name here>
+Author: Jayden Pope
 
 Purpose: Part 2 of assignment 8, finding the path to the end of a maze using recursion.
 
@@ -21,11 +21,21 @@ position:
 
 What would be your strategy?
 
-<Answer here>
+I would give each thread an id using a variable in solve_find_end. The variable would
+start at 0 and be passed with the first call of search. From their each time a new thread is
+created I'd increment the variable by 1 and pass it to that thread. This would give each thread
+a unique ID I could identify them by. Then I'd modify the program so the end stage returns true 
+like my solution from part 1 but instead of just returning True. I'd have an instance variable
+for each thread that add's every move it makes to a list. When the end is found I'd remove from
+the end of that list until it was empty adding each removal to a stack in solve_find_end.
 
 Why would it work?
 
-<Answer here>
+I think this would work because by adding the path taken by a thread into a stack starting
+from the end, and by following the threads back to the start using the parent ID bassed to
+every child thread, you could successfully reconstruct the path to the end in reverse order in
+the stack, and if you just want it in a list for example, you'd pop the stack into a list,
+giving you the path from start to finish.
 
 """
 
@@ -79,6 +89,12 @@ def get_color():
 
 
 # TODO: Add any function(s) you need, if any, here.
+def try_move(maze, row, col, color, lock):
+    with lock:
+        if maze.can_move_here(row, col):
+            maze.move(row, col, color)
+            return True
+        return False
 
 
 def solve_find_end(maze):
@@ -86,6 +102,52 @@ def solve_find_end(maze):
     # When one of the threads finds the end position, stop all of them.
     global stop
     stop = False
+
+    move_lock = threading.Lock()
+    end = None
+
+    def search(row, col, color):
+        global stop 
+
+        if stop:
+            return
+        if maze.at_end(row, col):
+            stop = True
+
+            nonlocal end 
+            end = (row, col)
+            return
+
+        moves = maze.get_possible_moves(row, col)
+
+        if not moves:
+            return
+
+        origin, *clones = moves
+
+        clone_list = []
+        for r, c in clones:
+            new_color = get_color()
+            if try_move(maze, r, c, new_color, move_lock):
+                t = threading.Thread(target=search, args=(r, c, new_color))
+                clone_list.append(t)
+                t.start()
+
+        if try_move(maze, origin[0], origin[1], color, move_lock):
+            search(origin[0], origin[1], color)
+
+        for t in clone_list:
+            t.join()
+
+    row, col = maze.get_start_pos()
+    color = get_color()
+    try_move(maze, row, col, color, move_lock)
+    search(row, col, color)
+
+    return end
+
+
+
 
 
 

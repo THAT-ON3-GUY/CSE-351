@@ -1,7 +1,7 @@
 """
 Course: CSE 351
 Assignment: 06
-Author: [Your Name]
+Author: Jayden Pope
 
 Instructions:
 
@@ -18,8 +18,6 @@ from cse351 import *
 
 # Folders
 INPUT_FOLDER = "faces"
-STEP1_OUTPUT_FOLDER = "step1_smoothed"
-STEP2_OUTPUT_FOLDER = "step2_grayscale"
 STEP3_OUTPUT_FOLDER = "step3_edges"
 
 # Parameters for image processing
@@ -57,33 +55,30 @@ def task_detect_edges(image, threshold1, threshold2):
     return cv2.Canny(image, threshold1, threshold2)
 
 # ---------------------------------------------------------------------------
-def process_images_in_folder(input_folder,              # input folder with images
-                             output_folder,             # output folder for processed images
-                             processing_function,       # function to process the image (ie., task_...())
-                             load_args=None,            # Optional args for cv2.imread
-                             processing_args=None):     # Optional args for processing function
+def process_images_in_folder(input_queue,
+                             processing_function,
+                             output_queue=None,
+                             input_folder=None,
+                             output_folder=None,
+                             barrier=None,
+                             processing_args=None,
+                             worker_count=None):
 
-    create_folder_if_not_exists(output_folder)
-    print(f"\nProcessing images from '{input_folder}' to '{output_folder}'...")
+    while True:
 
-    processed_count = 0
-    for filename in os.listdir(input_folder):
-        file_ext = os.path.splitext(filename)[1].lower()
-        if file_ext not in ALLOWED_EXTENSIONS:
-            continue
+        input_value = input_queue.get()
+        if input_value is None:
+            break
+        filename, img = input_value
 
-        input_image_path = os.path.join(input_folder, filename)
-        output_image_path = os.path.join(output_folder, filename) # Keep original filename
 
         try:
-            # Read the image
-            if load_args is not None:
-                img = cv2.imread(input_image_path, load_args)
-            else:
+            if input_folder is not None:
+                input_image_path = os.path.join(input_folder, filename)
                 img = cv2.imread(input_image_path)
 
             if img is None:
-                print(f"Warning: Could not read image '{input_image_path}'. Skipping.")
+                print(f"Warning: Could not read image '{filename}'. Skipping.")
                 continue
 
             # Apply the processing function
@@ -92,42 +87,61 @@ def process_images_in_folder(input_folder,              # input folder with imag
             else:
                 processed_img = processing_function(img)
 
-            # Save the processed image
-            cv2.imwrite(output_image_path, processed_img)
+            if output_queue is not None:
+                output_queue.put((filename, processed_img))
+            else:
+                output_image_path = os.path.join(output_folder, filename)
+                cv2.imwrite(output_image_path, processed_img)
 
-            processed_count += 1
         except Exception as e:
-            print(f"Error processing file '{input_image_path}': {e}")
+            print(f"Error processing file '{filename}': {e}")
 
-    print(f"Finished processing. {processed_count} images processed into '{output_folder}'.")
+
+    if barrier is not None:
+        barrier_index = barrier.wait()
+        if barrier_index == 0:
+            for _ in range(worker_count):
+                output_queue.put(None)
 
 # ---------------------------------------------------------------------------
 def run_image_processing_pipeline():
     print("Starting image processing pipeline...")
 
-    # TODO
-    # - create queues
-    # - create barriers
-    # - create the three processes groups
-    # - you are free to change anything in the program as long as you
-    #   do all requirements.
+    SMOOTHING = 3
+    GREYSCALE = 2
+    EDGE_DETECT = 3
 
-    # --- Step 1: Smooth Images ---
-    process_images_in_folder(INPUT_FOLDER, STEP1_OUTPUT_FOLDER, task_smooth_image,
-                             processing_args=(GAUSSIAN_BLUR_KERNEL_SIZE,))
+    smoothingQ = mp.SimpleQueue()
+    greyscaleQ = mp.SimpleQueue()
+    edgeQ = mp.SimpleQueue()
+    
+    smoothing_shield = mp.Barrier(SMOOTHING)
+    grey_shield = mp.Barrier(GREYSCALE)
 
-    # --- Step 2: Convert to Grayscale ---
-    process_images_in_folder(STEP1_OUTPUT_FOLDER, STEP2_OUTPUT_FOLDER, task_convert_to_grayscale)
+    create_folder_if_not_exists(STEP3_OUTPUT_FOLDER)
 
-    # --- Step 3: Detect Edges ---
-    process_images_in_folder(STEP2_OUTPUT_FOLDER, STEP3_OUTPUT_FOLDER, task_detect_edges,
-                             load_args=cv2.IMREAD_GRAYSCALE,        
-                             processing_args=(CANNY_THRESHOLD1, CANNY_THRESHOLD2))
+    smooth =[mp.Process(target=process_images_in_folder, args=(smoothingQ, task_smooth_image), kwargs={"output_queue": greyscaleQ, "input_folder": INPUT_FOLDER, "barrier": smoothing_shield, "worker_count": GREYSCALE, "processing_args": (GAUSSIAN_BLUR_KERNEL_SIZE,)}) for _ in range(SMOOTHING)]
+    grey =[mp.Process(target=process_images_in_folder, args=(greyscaleQ, task_convert_to_grayscale), kwargs={"output_queue": edgeQ, "barrier": grey_shield, "worker_count": EDGE_DETECT}) for _ in range(GREYSCALE)]
+    edge =[mp.Process(target=process_images_in_folder, args=(edgeQ, task_detect_edges), kwargs={"output_folder": STEP3_OUTPUT_FOLDER, "processing_args": (CANNY_THRESHOLD1, CANNY_THRESHOLD2)}) for _ in range(EDGE_DETECT)]
+
+    print(f"\nProcessing images from '{INPUT_FOLDER}' to '{STEP3_OUTPUT_FOLDER}'...")
+
+
+    [p.start() for p in smooth + grey + edge]
+
+    for filename in os.listdir(INPUT_FOLDER):
+        file_ext = os.path.splitext(filename)[1].lower()
+        if file_ext not in ALLOWED_EXTENSIONS:
+            continue
+        smoothingQ.put((filename, None))
+
+    for _ in range(SMOOTHING):
+        smoothingQ.put(None)
+
+    [p.join() for p in smooth + grey + edge]
 
     print("\nImage processing pipeline finished!")
     print(f"Original images are in: '{INPUT_FOLDER}'")
-    print(f"Grayscale images are in: '{STEP1_OUTPUT_FOLDER}'")
-    print(f"Smoothed images are in: '{STEP2_OUTPUT_FOLDER}'")
     print(f"Edge images are in: '{STEP3_OUTPUT_FOLDER}'")
 
 
